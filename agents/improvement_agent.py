@@ -15,8 +15,8 @@ class ImprovementAgent(BaseAgent):
         )
 
         improvement_prompt = cleandoc(
-            f"""
-            You are a self-improving AI agent. Here are the evaluation results of your performance as a ticket classification agent:
+            f"""<task>
+            You are a prompt engineering expert. Your task is to improve the system prompt based on evaluation results.
 
             Current system prompt:
             {current_prompt}
@@ -25,8 +25,21 @@ class ImprovementAgent(BaseAgent):
 
             Evaluation results:
             {results_str}
+            </task>
 
-            Please analyze these results and suggest an improved system prompt that would lead to better classification accuracy. Respond with only the new prompt text.
+            <guidelines>
+            Follow prompt engineering best practices:
+            1. Be clear and direct in instructions
+            2. Use examples (multishot prompting) when helpful
+            3. Enable chain-of-thought reasoning
+            4. Use XML tags to structure different components
+            5. Keep the prompt focused and specific
+            </guidelines>
+
+            <output_format>
+            Respond ONLY with the new improved prompt text. Do not include any explanations or other text.
+            The prompt should be self-contained and ready to use.
+            </output_format>
             """
         )
 
