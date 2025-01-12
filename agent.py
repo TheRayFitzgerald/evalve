@@ -1,5 +1,7 @@
 from anthropic import Anthropic
 from typing import List, Dict, Any
+from inspect import cleandoc
+
 
 class ClassificationAgent:
     def __init__(self, api_key: str, system_prompt: str):
@@ -18,37 +20,43 @@ class ClassificationAgent:
             model="claude-3-sonnet-20240229",
             max_tokens=1024,
             messages=messages,
-            system=self.system_prompt
+            system=self.system_prompt,
         )
-        
+
         return response.content[0].text.strip().lower()
 
     def improve_prompt(self, eval_results: Dict[str, Any], current_prompt: str) -> str:
         # Convert eval_results to a formatted string for better readability
-        results_str = "\n".join([
-            f"Ticket: {result['ticket']}\n"
-            f"Predicted: {result['predicted']}\n"
-            f"Actual: {result['actual']}\n"
-            f"Correct: {result['correct']}\n"
-            for result in eval_results['detailed_results']
-        ])
-        
-        improvement_prompt = f"""You are a self-improving AI agent. Here are the evaluation results of your performance as a ticket classification agent:
+        results_str = "\n".join(
+            [
+                f"Ticket: {result['ticket']}\n"
+                f"Predicted: {result['predicted']}\n"
+                f"Actual: {result['actual']}\n"
+                f"Correct: {result['correct']}\n"
+                for result in eval_results["detailed_results"]
+            ]
+        )
 
-Current system prompt:
-{current_prompt}
+        improvement_prompt = cleandoc(
+            f"""
+            You are a self-improving AI agent. Here are the evaluation results of your performance as a ticket classification agent:
 
-Current accuracy: {eval_results['accuracy']:.2%}
+            Current system prompt:
+            {current_prompt}
 
-Evaluation results:
-{results_str}
+            Current accuracy: {eval_results['accuracy']:.2%}
 
-Please analyze these results and suggest an improved system prompt that would lead to better classification accuracy. Respond with only the new prompt text."""
+            Evaluation results:
+            {results_str}
+
+            Please analyze these results and suggest an improved system prompt that would lead to better classification accuracy. Respond with only the new prompt text.
+        """
+        )
 
         response = self.client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=2048,
-            messages=[{"role": "user", "content": improvement_prompt}]
+            messages=[{"role": "user", "content": improvement_prompt}],
         )
-        
-        return response.content[0].text.strip() 
+
+        return response.content[0].text.strip()
