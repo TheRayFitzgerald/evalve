@@ -48,9 +48,16 @@ def main():
             print("Perfect accuracy achieved!")
             break
 
-    print("\nFinal Results:")
-    print(f"Best accuracy: {best_accuracy:.2%}")
-    print(f"Best prompt:\n{best_prompt}")
+    print("\n" + "="*50)
+    print("\033[92m")  # Set text color to green
+    print("🎯 Final Results 🎯")
+    print("="*50)
+    print(f"Best accuracy: {best_accuracy:.2%}" + (" 🎊 🎉 🎊" if best_accuracy == 1.0 else ""))
+    print("\nBest prompt:")
+    print("-"*50)
+    print(f"{best_prompt}")
+    print("\033[0m")  # Reset text color
+    print("="*50)
 
 
 if __name__ == "__main__":
