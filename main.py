@@ -1,11 +1,12 @@
 from config import ANTHROPIC_API_KEY, INITIAL_PROMPT, EVAL_DATASET
-from agent import ClassificationAgent
+from agents import ClassificationAgent, ImprovementAgent
 from evaluator import evaluate_agent
 
 def main():
-    # Initialize agent with initial prompt
+    # Initialize agents
     current_prompt = INITIAL_PROMPT
-    agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
+    classification_agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
+    improvement_agent = ImprovementAgent(ANTHROPIC_API_KEY, "")  # Empty prompt as it's not needed
     
     max_iterations = 5
     best_accuracy = 0
@@ -16,7 +17,7 @@ def main():
         print("-" * 50)
         
         # Evaluate current performance
-        eval_results = evaluate_agent(agent, EVAL_DATASET)
+        eval_results = evaluate_agent(classification_agent, EVAL_DATASET)
         current_accuracy = eval_results["accuracy"]
         print(f"Current accuracy: {current_accuracy:.2%}")
         
@@ -26,8 +27,8 @@ def main():
             best_prompt = current_prompt
         
         # Try to improve prompt
-        current_prompt = agent.improve_prompt(eval_results, current_prompt)
-        agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
+        current_prompt = improvement_agent.improve_prompt(eval_results, current_prompt)
+        classification_agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
         
         # Break if perfect accuracy is achieved
         if current_accuracy == 1.0:

@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from agent import ClassificationAgent
+from agents import ClassificationAgent
 from config import EvalItem
 
 def evaluate_agent(agent: ClassificationAgent, eval_dataset: List[EvalItem]) -> Dict[str, Any]:

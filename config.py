@@ -10,6 +10,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 if not ANTHROPIC_API_KEY:
     raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
 
+# Add type annotation to ensure it's treated as str
+ANTHROPIC_API_KEY: str = ANTHROPIC_API_KEY
+
 
 class EvalItem(TypedDict):
     ticket: str
