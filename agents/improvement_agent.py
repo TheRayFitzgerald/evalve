@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from inspect import cleandoc
@@ -21,15 +21,31 @@ class EvaluationResults(TypedDict):
 
 
 @dataclass
-class Case:
+class Improvement:
     ticket: str
-    predicted: UrgencyLevel
+    from_prediction: UrgencyLevel
+    to_prediction: UrgencyLevel
     actual: UrgencyLevel
-    description: str = ""
 
     def format(self, indent: int = 2) -> str:
         spaces = " " * indent
-        return f"{spaces}- {self.description}"
+        return f"{spaces}- Fixed: Was {self.from_prediction}, now correctly {self.to_prediction}"
+
+
+@dataclass
+class Regression:
+    ticket: str
+    from_prediction: UrgencyLevel
+    to_prediction: UrgencyLevel
+    actual: UrgencyLevel
+
+    def format(self, indent: int = 2) -> str:
+        spaces = " " * indent
+        return f"{spaces}- Regressed: Was correct ({self.from_prediction}), now wrong ({self.to_prediction})"
+
+
+# Type alias for cases
+Case = Improvement | Regression
 
 
 @dataclass
@@ -40,18 +56,14 @@ class PromptChange:
     motivation: str
     accuracy_before: float
     accuracy_after: float | None = None
-    fixed_cases: list[Case] = field(default_factory=list)
-    regression_cases: list[Case] = field(default_factory=list)
+    improvements: list[Improvement] = field(default_factory=list)
+    regressions: list[Regression] = field(default_factory=list)
 
     def format_accuracy(self) -> str:
-        return (
-            f"{self.accuracy_after:.2%}"
-            if self.accuracy_after is not None
-            else "Not evaluated yet"
-        )
+        return f"{self.accuracy_after:.2%}" if self.accuracy_after is not None else "Not evaluated yet"
 
     @staticmethod
-    def format_cases(cases: list[Case], indent: int = 2) -> str:
+    def format_cases(cases: Sequence[Case], indent: int = 2) -> str:
         if not cases:
             return f"{' ' * indent}None"
         return "\n".join(case.format(indent) for case in cases)
@@ -64,9 +76,9 @@ class PromptChange:
             - Previous accuracy: {self.accuracy_before:.2%}
             - New accuracy: {self.format_accuracy()}
             - Fixed cases:
-            {PromptChange.format_cases(self.fixed_cases)}
+            {PromptChange.format_cases(self.improvements)}
             - Regression cases:
-            {PromptChange.format_cases(self.regression_cases)}
+            {PromptChange.format_cases(self.regressions)}
         """
         )
 
@@ -79,12 +91,12 @@ class PromptHistory:
         self.changes.append(change)
 
     def update_last_change_results(
-        self, accuracy: float, fixed_cases: list[Case], regression_cases: list[Case]
+        self, accuracy: float, improvements: list[Improvement], regressions: list[Regression]
     ):
         if self.changes:
             self.changes[-1].accuracy_after = accuracy
-            self.changes[-1].fixed_cases = fixed_cases
-            self.changes[-1].regression_cases = regression_cases
+            self.changes[-1].improvements = improvements
+            self.changes[-1].regressions = regressions
 
     def get_last_change_summary(self) -> str:
         return self.changes[-1].format_summary() if self.changes else ""
@@ -100,15 +112,15 @@ class PromptHistory:
                 if change.accuracy_after is not None
                 else "pending"
             )
-            fixed_count = len(change.fixed_cases)
-            regression_count = len(change.regression_cases)
+            improvement_count = len(change.improvements)
+            regression_count = len(change.regressions)
 
             summary = cleandoc(
                 f"""
                 Change #{i}:
                 Motivation: {change.motivation}
                 Accuracy: {change.accuracy_before:.2%} → {change.format_accuracy()} ({accuracy_delta})
-                Fixed: {fixed_count} cases
+                Fixed: {improvement_count} cases
                 Regressions: {regression_count} cases
             """
             )
@@ -126,9 +138,9 @@ class ImprovementAgent(BaseAgent):
         self,
         eval_results: EvaluationResults,
         previous_results: EvaluationResults | None,
-    ) -> tuple[list[Case], list[Case]]:
-        fixed_cases: list[Case] = []
-        regression_cases: list[Case] = []
+    ) -> tuple[list[Improvement], list[Regression]]:
+        improvements: list[Improvement] = []
+        regressions: list[Regression] = []
 
         if previous_results:
             prev_results_map = {
@@ -138,31 +150,27 @@ class ImprovementAgent(BaseAgent):
                 r["ticket"]: r for r in eval_results["detailed_results"]
             }
 
-            # Find fixed and regression cases
+            # Find improvements and regressions
             for ticket, curr_result in current_results_map.items():
                 if ticket in prev_results_map:
                     prev_result = prev_results_map[ticket]
 
                     if not prev_result["correct"] and curr_result["correct"]:
-                        fixed_cases.append(
-                            Case(
-                                ticket=ticket,
-                                predicted=curr_result["predicted"],
-                                actual=curr_result["actual"],
-                                description=f"Fixed: Was {prev_result['predicted']}, now correctly {curr_result['predicted']}",
-                            )
-                        )
+                        improvements.append(Improvement(
+                            ticket=ticket,
+                            from_prediction=prev_result["predicted"],
+                            to_prediction=curr_result["predicted"],
+                            actual=curr_result["actual"]
+                        ))
                     elif prev_result["correct"] and not curr_result["correct"]:
-                        regression_cases.append(
-                            Case(
-                                ticket=ticket,
-                                predicted=curr_result["predicted"],
-                                actual=curr_result["actual"],
-                                description=f"Regressed: Was correct {prev_result['predicted']}, now wrong {curr_result['predicted']}",
-                            )
-                        )
+                        regressions.append(Regression(
+                            ticket=ticket,
+                            from_prediction=prev_result["predicted"],
+                            to_prediction=curr_result["predicted"],
+                            actual=curr_result["actual"]
+                        ))
 
-        return fixed_cases, regression_cases
+        return improvements, regressions
 
     def improve_prompt(
         self,
@@ -170,13 +178,13 @@ class ImprovementAgent(BaseAgent):
         current_prompt: str,
         previous_results: EvaluationResults | None = None,
     ) -> str:
-        fixed_cases, regression_cases = self._analyze_changes(
+        improvements, regressions = self._analyze_changes(
             eval_results, previous_results
         )
 
         # Update previous change with current results
         if self.history.changes:
-            self.history.update_last_change_results(eval_results["accuracy"], fixed_cases, regression_cases)
+            self.history.update_last_change_results(eval_results["accuracy"], improvements, regressions)
 
         # Format evaluation results
         results_str = "\n".join(
@@ -202,10 +210,10 @@ class ImprovementAgent(BaseAgent):
             {results_str}
 
             Fixed cases from last change:
-            {PromptChange.format_cases(fixed_cases)}
+            {PromptChange.format_cases(improvements)}
             
             Regression cases from last change:
-            {PromptChange.format_cases(regression_cases)}
+            {PromptChange.format_cases(regressions)}
             </task>
 
             <guidelines>
