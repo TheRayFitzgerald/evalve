@@ -24,6 +24,10 @@ class Case:
     actual: UrgencyLevel
     description: str = ""
 
+    def format(self, indent: int = 2) -> str:
+        spaces = " " * indent
+        return f"{spaces}- {self.description}"
+
 @dataclass
 class PromptChange:
     timestamp: datetime
@@ -34,6 +38,27 @@ class PromptChange:
     accuracy_after: float | None = None
     fixed_cases: list[Case] = field(default_factory=list)
     regression_cases: list[Case] = field(default_factory=list)
+
+    def format_accuracy(self) -> str:
+        return f"{self.accuracy_after:.2%}" if self.accuracy_after is not None else "Not evaluated yet"
+    
+    @staticmethod
+    def format_cases(cases: list[Case], indent: int = 2) -> str:
+        if not cases:
+            return f"{' ' * indent}None"
+        return "\n".join(case.format(indent) for case in cases)
+    
+    def format_summary(self) -> str:
+        return cleandoc(f"""
+            Previous change summary:
+            - Motivation: {self.motivation}
+            - Previous accuracy: {self.accuracy_before:.2%}
+            - New accuracy: {self.format_accuracy()}
+            - Fixed cases:
+            {PromptChange.format_cases(self.fixed_cases)}
+            - Regression cases:
+            {PromptChange.format_cases(self.regression_cases)}
+        """)
 
 class PromptHistory:
     def __init__(self):
@@ -47,6 +72,9 @@ class PromptHistory:
             self.changes[-1].accuracy_after = accuracy
             self.changes[-1].fixed_cases = fixed_cases
             self.changes[-1].regression_cases = regression_cases
+    
+    def get_last_change_summary(self) -> str:
+        return self.changes[-1].format_summary() if self.changes else ""
 
 class ImprovementAgent(BaseAgent):
     def __init__(self, api_key: str, system_prompt: str):
@@ -86,38 +114,14 @@ class ImprovementAgent(BaseAgent):
     def improve_prompt(self, eval_results: EvaluationResults, current_prompt: str, previous_results: EvaluationResults | None = None) -> str:
         fixed_cases, regression_cases = self._analyze_changes(eval_results, previous_results)
         
-        # Create history summary
-        history_summary = ""
-        if self.history.changes:
-            last_change = self.history.changes[-1]
-            accuracy_str = f"{last_change.accuracy_after:.2%}" if last_change.accuracy_after is not None else "Not evaluated yet"
-            
-            fixed_cases_str = "\n".join(f"  - {case.description}" for case in last_change.fixed_cases) if last_change.fixed_cases else "  None"
-            regression_cases_str = "\n".join(f"  - {case.description}" for case in last_change.regression_cases) if last_change.regression_cases else "  None"
-            
-            history_summary = cleandoc(f"""
-                Previous change summary:
-                - Motivation: {last_change.motivation}
-                - Previous accuracy: {last_change.accuracy_before:.2%}
-                - New accuracy: {accuracy_str}
-                - Fixed cases:
-                {fixed_cases_str}
-                - Regression cases:
-                {regression_cases_str}
-            """)
-
+        # Format evaluation results
         results_str = "\n".join(
-            [
-                f"Ticket: {result['ticket']}\n"
-                f"Predicted: {result['predicted']}\n"
-                f"Actual: {result['actual']}\n"
-                f"Correct: {result['correct']}\n"
-                for result in eval_results["detailed_results"]
-            ]
+            f"Ticket: {result['ticket']}\n"
+            f"Predicted: {result['predicted']}\n"
+            f"Actual: {result['actual']}\n"
+            f"Correct: {result['correct']}"
+            for result in eval_results["detailed_results"]
         )
-
-        current_fixed_str = "\n".join(f"  - {case.description}" for case in fixed_cases) if fixed_cases else "  None"
-        current_regression_str = "\n".join(f"  - {case.description}" for case in regression_cases) if regression_cases else "  None"
 
         improvement_prompt = cleandoc(
             f"""<task>
@@ -128,16 +132,16 @@ class ImprovementAgent(BaseAgent):
 
             Current accuracy: {eval_results['accuracy']:.2%}
 
-            {history_summary if history_summary else ""}
+            {self.history.get_last_change_summary()}
 
             Evaluation results:
             {results_str}
 
             Fixed cases from last change:
-            {current_fixed_str}
+            {PromptChange.format_cases(fixed_cases)}
             
             Regression cases from last change:
-            {current_regression_str}
+            {PromptChange.format_cases(regression_cases)}
             </task>
 
             <guidelines>
