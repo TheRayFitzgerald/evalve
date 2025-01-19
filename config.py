@@ -1,22 +1,23 @@
 import os
 from dotenv import load_dotenv
-from typing import TypedDict, List
+from typing import TypedDict, cast
 from inspect import cleandoc
+from agents.improvement_agent import UrgencyLevel
 
 load_dotenv()
 
 # Ensure API key is available
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
+api_key = os.getenv("ANTHROPIC_API_KEY")
+if not api_key:
     raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
 
-# Add type annotation to ensure it's treated as str
-ANTHROPIC_API_KEY: str = ANTHROPIC_API_KEY
+# Cast to str since we've verified it exists
+ANTHROPIC_API_KEY: str = cast(str, api_key)
 
 
 class EvalItem(TypedDict):
     ticket: str
-    ground_truth: str
+    ground_truth: UrgencyLevel
 
 
 INITIAL_PROMPT = cleandoc(
@@ -33,7 +34,7 @@ INITIAL_PROMPT = cleandoc(
     """
 )
 
-EVAL_DATASET: List[EvalItem] = [
+EVAL_DATASET: list[EvalItem] = [
     {
         "ticket": "I can't find where to change my password",
         "ground_truth": "low",

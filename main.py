@@ -1,5 +1,6 @@
 from config import ANTHROPIC_API_KEY, INITIAL_PROMPT, EVAL_DATASET
 from agents import ClassificationAgent, ImprovementAgent
+from agents.improvement_agent import EvaluationResults
 from evaluator import evaluate_agent
 
 MAX_ITERATIONS = 10
@@ -16,13 +17,14 @@ def main():
     best_accuracy = 0
     best_prompt = current_prompt
     consecutive_regressions = 0
+    previous_results: EvaluationResults | None = None
 
     for iteration in range(MAX_ITERATIONS):
         print(f"\nIteration {iteration + 1}")
         print("-" * 50)
 
         # Evaluate current performance
-        eval_results = evaluate_agent(classification_agent, EVAL_DATASET)
+        eval_results: EvaluationResults = evaluate_agent(classification_agent, EVAL_DATASET)
         current_accuracy = eval_results["accuracy"]
         print(f"Current accuracy: {current_accuracy:.2%}")
 
@@ -40,8 +42,11 @@ def main():
                 best_prompt = current_prompt
 
         # Try to improve prompt
-        current_prompt = improvement_agent.improve_prompt(eval_results, current_prompt)
+        current_prompt = improvement_agent.improve_prompt(eval_results, current_prompt, previous_results)
         classification_agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
+        
+        # Store current results for next iteration
+        previous_results = eval_results
 
         # Break if perfect accuracy is achieved
         if current_accuracy == 1.0:
@@ -53,7 +58,12 @@ def main():
     print("🎯 Final Results 🎯")
     print("="*50)
     print(f"Best accuracy: {best_accuracy:.2%}" + (" 🎊 🎉 🎊" if best_accuracy == 1.0 else ""))
-    print("\nBest prompt:")
+    
+    print("\n📈 Improvement History:")
+    print("-"*50)
+    print(improvement_agent.history.format_history())
+    
+    print("\n📝 Best Prompt:")
     print("-"*50)
     print(f"{best_prompt}")
     print("\033[0m")  # Reset text color

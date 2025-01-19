@@ -1,17 +1,198 @@
-from typing import Dict, Any
+from typing import Literal, TypedDict, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
 from inspect import cleandoc
 from .base import BaseAgent
 
+# Shared type for urgency levels
+UrgencyLevel = Literal["low", "medium", "high", "critical"]
+
+
+class TicketResult(TypedDict):
+    ticket: str
+    predicted: UrgencyLevel
+    actual: UrgencyLevel
+    correct: bool
+
+
+class EvaluationResults(TypedDict):
+    accuracy: float
+    detailed_results: list[TicketResult]
+
+
+@dataclass
+class Improvement:
+    ticket: str
+    from_prediction: UrgencyLevel
+    to_prediction: UrgencyLevel
+    actual: UrgencyLevel
+
+    def format(self, indent: int = 2) -> str:
+        spaces = " " * indent
+        return f"{spaces}- Fixed: Was {self.from_prediction}, now correctly {self.to_prediction}"
+
+
+@dataclass
+class Regression:
+    ticket: str
+    from_prediction: UrgencyLevel
+    to_prediction: UrgencyLevel
+    actual: UrgencyLevel
+
+    def format(self, indent: int = 2) -> str:
+        spaces = " " * indent
+        return f"{spaces}- Regressed: Was correct ({self.from_prediction}), now wrong ({self.to_prediction})"
+
+
+# Type alias for cases
+Case = Improvement | Regression
+
+
+@dataclass
+class PromptChange:
+    timestamp: datetime
+    old_prompt: str
+    new_prompt: str
+    motivation: str
+    accuracy_before: float
+    accuracy_after: float | None = None
+    improvements: list[Improvement] = field(default_factory=list)
+    regressions: list[Regression] = field(default_factory=list)
+
+    def format_accuracy(self) -> str:
+        return f"{self.accuracy_after:.2%}" if self.accuracy_after is not None else "Not evaluated yet"
+
+    @staticmethod
+    def format_cases(cases: Sequence[Case], indent: int = 2) -> str:
+        if not cases:
+            return f"{' ' * indent}None"
+        return "\n".join(case.format(indent) for case in cases)
+
+    def format_summary(self) -> str:
+        return cleandoc(
+            f"""
+            Previous change summary:
+            - Motivation: {self.motivation}
+            - Previous accuracy: {self.accuracy_before:.2%}
+            - New accuracy: {self.format_accuracy()}
+            - Fixed cases:
+            {PromptChange.format_cases(self.improvements)}
+            - Regression cases:
+            {PromptChange.format_cases(self.regressions)}
+        """
+        )
+
+
+class PromptHistory:
+    def __init__(self):
+        self.changes: list[PromptChange] = []
+
+    def add_change(self, change: PromptChange):
+        self.changes.append(change)
+
+    def update_last_change_results(
+        self, accuracy: float, improvements: list[Improvement], regressions: list[Regression]
+    ):
+        if self.changes:
+            self.changes[-1].accuracy_after = accuracy
+            self.changes[-1].improvements = improvements
+            self.changes[-1].regressions = regressions
+
+    def get_last_change_summary(self) -> str:
+        return self.changes[-1].format_summary() if self.changes else ""
+
+    def format_history(self) -> str:
+        if not self.changes:
+            return "No changes made"
+
+        summaries = []
+        for i, change in enumerate(self.changes, 1):
+            accuracy_delta = (
+                f"{change.accuracy_after - change.accuracy_before:+.2%}"
+                if change.accuracy_after is not None
+                else "pending"
+            )
+            improvement_count = len(change.improvements)
+            regression_count = len(change.regressions)
+
+            summary = cleandoc(
+                f"""
+                Change #{i}:
+                Motivation: {change.motivation}
+                Accuracy: {change.accuracy_before:.2%} → {change.format_accuracy()} ({accuracy_delta})
+                Fixed: {improvement_count} cases
+                Regressions: {regression_count} cases
+            """
+            )
+            summaries.append(summary)
+
+        return "\n\n".join(summaries)
+
+
 class ImprovementAgent(BaseAgent):
-    def improve_prompt(self, eval_results: Dict[str, Any], current_prompt: str) -> str:
+    def __init__(self, api_key: str, system_prompt: str):
+        super().__init__(api_key, system_prompt)
+        self.history = PromptHistory()
+
+    def _analyze_changes(
+        self,
+        eval_results: EvaluationResults,
+        previous_results: EvaluationResults | None,
+    ) -> tuple[list[Improvement], list[Regression]]:
+        improvements: list[Improvement] = []
+        regressions: list[Regression] = []
+
+        if previous_results:
+            prev_results_map = {
+                r["ticket"]: r for r in previous_results["detailed_results"]
+            }
+            current_results_map = {
+                r["ticket"]: r for r in eval_results["detailed_results"]
+            }
+
+            # Find improvements and regressions
+            for ticket, curr_result in current_results_map.items():
+                if ticket in prev_results_map:
+                    prev_result = prev_results_map[ticket]
+
+                    if not prev_result["correct"] and curr_result["correct"]:
+                        improvements.append(Improvement(
+                            ticket=ticket,
+                            from_prediction=prev_result["predicted"],
+                            to_prediction=curr_result["predicted"],
+                            actual=curr_result["actual"]
+                        ))
+                    elif prev_result["correct"] and not curr_result["correct"]:
+                        regressions.append(Regression(
+                            ticket=ticket,
+                            from_prediction=prev_result["predicted"],
+                            to_prediction=curr_result["predicted"],
+                            actual=curr_result["actual"]
+                        ))
+
+        return improvements, regressions
+
+    def improve_prompt(
+        self,
+        eval_results: EvaluationResults,
+        current_prompt: str,
+        previous_results: EvaluationResults | None = None,
+    ) -> str:
+        improvements, regressions = self._analyze_changes(
+            eval_results, previous_results
+        )
+
+        # Update previous change with current results
+        if self.history.changes:
+            self.history.update_last_change_results(eval_results["accuracy"], improvements, regressions)
+
+        # Format evaluation results
         results_str = "\n".join(
-            [
-                f"Ticket: {result['ticket']}\n"
-                f"Predicted: {result['predicted']}\n"
-                f"Actual: {result['actual']}\n"
-                f"Correct: {result['correct']}\n"
-                for result in eval_results["detailed_results"]
-            ]
+            f"Ticket: {result['ticket']}\n"
+            f"Predicted: {result['predicted']}\n"
+            f"Actual: {result['actual']}\n"
+            f"Correct: {result['correct']}"
+            for result in eval_results["detailed_results"]
         )
 
         improvement_prompt = cleandoc(
@@ -23,8 +204,16 @@ class ImprovementAgent(BaseAgent):
 
             Current accuracy: {eval_results['accuracy']:.2%}
 
+            {self.history.get_last_change_summary()}
+
             Evaluation results:
             {results_str}
+
+            Fixed cases from last change:
+            {PromptChange.format_cases(improvements)}
+            
+            Regression cases from last change:
+            {PromptChange.format_cases(regressions)}
             </task>
 
             <guidelines>
@@ -34,14 +223,18 @@ class ImprovementAgent(BaseAgent):
             3. Enable chain-of-thought reasoning
             4. Use XML tags to structure different components
             5. Keep the prompt focused and specific
+            6. Consider the impact of previous changes
+            7. Avoid changes that might cause regressions
             </guidelines>
 
             <output_format>
-            Respond ONLY with the new improved prompt text. Do not include any explanations or other text.
-            The prompt should be self-contained and ready to use.
+            First, provide a one-line motivation for your changes starting with "MOTIVATION: ".
+            Then, on a new line, provide the new improved prompt text.
             </output_format>
             """
         )
+
+        print(improvement_prompt)
 
         response = self.client.messages.create(
             model="claude-3-5-sonnet-20241022",
@@ -49,4 +242,21 @@ class ImprovementAgent(BaseAgent):
             messages=[{"role": "user", "content": improvement_prompt}],
         )
 
-        return response.content[0].text.strip() 
+        response_text = response.content[0].text.strip()
+
+        # Parse motivation and new prompt
+        motivation_line, new_prompt = response_text.split("\n", 1)
+        motivation = motivation_line.replace("MOTIVATION: ", "").strip()
+        new_prompt = new_prompt.strip()
+
+        # Record the change
+        change = PromptChange(
+            timestamp=datetime.now(),
+            old_prompt=current_prompt,
+            new_prompt=new_prompt,
+            motivation=motivation,
+            accuracy_before=eval_results["accuracy"],
+        )
+        self.history.add_change(change)
+
+        return new_prompt
