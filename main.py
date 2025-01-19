@@ -58,7 +58,12 @@ def main():
     print("🎯 Final Results 🎯")
     print("="*50)
     print(f"Best accuracy: {best_accuracy:.2%}" + (" 🎊 🎉 🎊" if best_accuracy == 1.0 else ""))
-    print("\nBest prompt:")
+    
+    print("\n📈 Improvement History:")
+    print("-"*50)
+    print(improvement_agent.history.format_history())
+    
+    print("\n📝 Best Prompt:")
     print("-"*50)
     print(f"{best_prompt}")
     print("\033[0m")  # Reset text color

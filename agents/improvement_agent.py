@@ -7,15 +7,18 @@ from .base import BaseAgent
 # Shared type for urgency levels
 UrgencyLevel = Literal["low", "medium", "high", "critical"]
 
+
 class TicketResult(TypedDict):
     ticket: str
     predicted: UrgencyLevel
     actual: UrgencyLevel
     correct: bool
 
+
 class EvaluationResults(TypedDict):
     accuracy: float
     detailed_results: list[TicketResult]
+
 
 @dataclass
 class Case:
@@ -27,6 +30,7 @@ class Case:
     def format(self, indent: int = 2) -> str:
         spaces = " " * indent
         return f"{spaces}- {self.description}"
+
 
 @dataclass
 class PromptChange:
@@ -40,16 +44,21 @@ class PromptChange:
     regression_cases: list[Case] = field(default_factory=list)
 
     def format_accuracy(self) -> str:
-        return f"{self.accuracy_after:.2%}" if self.accuracy_after is not None else "Not evaluated yet"
-    
+        return (
+            f"{self.accuracy_after:.2%}"
+            if self.accuracy_after is not None
+            else "Not evaluated yet"
+        )
+
     @staticmethod
     def format_cases(cases: list[Case], indent: int = 2) -> str:
         if not cases:
             return f"{' ' * indent}None"
         return "\n".join(case.format(indent) for case in cases)
-    
+
     def format_summary(self) -> str:
-        return cleandoc(f"""
+        return cleandoc(
+            f"""
             Previous change summary:
             - Motivation: {self.motivation}
             - Previous accuracy: {self.accuracy_before:.2%}
@@ -58,62 +67,117 @@ class PromptChange:
             {PromptChange.format_cases(self.fixed_cases)}
             - Regression cases:
             {PromptChange.format_cases(self.regression_cases)}
-        """)
+        """
+        )
+
 
 class PromptHistory:
     def __init__(self):
         self.changes: list[PromptChange] = []
-    
+
     def add_change(self, change: PromptChange):
         self.changes.append(change)
-    
-    def update_last_change_results(self, accuracy: float, fixed_cases: list[Case], regression_cases: list[Case]):
+
+    def update_last_change_results(
+        self, accuracy: float, fixed_cases: list[Case], regression_cases: list[Case]
+    ):
         if self.changes:
             self.changes[-1].accuracy_after = accuracy
             self.changes[-1].fixed_cases = fixed_cases
             self.changes[-1].regression_cases = regression_cases
-    
+
     def get_last_change_summary(self) -> str:
         return self.changes[-1].format_summary() if self.changes else ""
+
+    def format_history(self) -> str:
+        if not self.changes:
+            return "No changes made"
+
+        summaries = []
+        for i, change in enumerate(self.changes, 1):
+            accuracy_delta = (
+                f"{change.accuracy_after - change.accuracy_before:+.2%}"
+                if change.accuracy_after is not None
+                else "pending"
+            )
+            fixed_count = len(change.fixed_cases)
+            regression_count = len(change.regression_cases)
+
+            summary = cleandoc(
+                f"""
+                Change #{i}:
+                Motivation: {change.motivation}
+                Accuracy: {change.accuracy_before:.2%} → {change.format_accuracy()} ({accuracy_delta})
+                Fixed: {fixed_count} cases
+                Regressions: {regression_count} cases
+            """
+            )
+            summaries.append(summary)
+
+        return "\n\n".join(summaries)
+
 
 class ImprovementAgent(BaseAgent):
     def __init__(self, api_key: str, system_prompt: str):
         super().__init__(api_key, system_prompt)
         self.history = PromptHistory()
 
-    def _analyze_changes(self, eval_results: EvaluationResults, previous_results: EvaluationResults | None) -> tuple[list[Case], list[Case]]:
+    def _analyze_changes(
+        self,
+        eval_results: EvaluationResults,
+        previous_results: EvaluationResults | None,
+    ) -> tuple[list[Case], list[Case]]:
         fixed_cases: list[Case] = []
         regression_cases: list[Case] = []
-        
+
         if previous_results:
-            prev_results_map = {r["ticket"]: r for r in previous_results["detailed_results"]}
-            current_results_map = {r["ticket"]: r for r in eval_results["detailed_results"]}
-            
+            prev_results_map = {
+                r["ticket"]: r for r in previous_results["detailed_results"]
+            }
+            current_results_map = {
+                r["ticket"]: r for r in eval_results["detailed_results"]
+            }
+
             # Find fixed and regression cases
             for ticket, curr_result in current_results_map.items():
                 if ticket in prev_results_map:
                     prev_result = prev_results_map[ticket]
-                    
+
                     if not prev_result["correct"] and curr_result["correct"]:
-                        fixed_cases.append(Case(
-                            ticket=ticket,
-                            predicted=curr_result["predicted"],
-                            actual=curr_result["actual"],
-                            description=f"Fixed: Was {prev_result['predicted']}, now correctly {curr_result['predicted']}"
-                        ))
+                        fixed_cases.append(
+                            Case(
+                                ticket=ticket,
+                                predicted=curr_result["predicted"],
+                                actual=curr_result["actual"],
+                                description=f"Fixed: Was {prev_result['predicted']}, now correctly {curr_result['predicted']}",
+                            )
+                        )
                     elif prev_result["correct"] and not curr_result["correct"]:
-                        regression_cases.append(Case(
-                            ticket=ticket,
-                            predicted=curr_result["predicted"],
-                            actual=curr_result["actual"],
-                            description=f"Regressed: Was correct {prev_result['predicted']}, now wrong {curr_result['predicted']}"
-                        ))
-        
+                        regression_cases.append(
+                            Case(
+                                ticket=ticket,
+                                predicted=curr_result["predicted"],
+                                actual=curr_result["actual"],
+                                description=f"Regressed: Was correct {prev_result['predicted']}, now wrong {curr_result['predicted']}",
+                            )
+                        )
+
         return fixed_cases, regression_cases
 
-    def improve_prompt(self, eval_results: EvaluationResults, current_prompt: str, previous_results: EvaluationResults | None = None) -> str:
-        fixed_cases, regression_cases = self._analyze_changes(eval_results, previous_results)
-        
+    def improve_prompt(
+        self,
+        eval_results: EvaluationResults,
+        current_prompt: str,
+        previous_results: EvaluationResults | None = None,
+    ) -> str:
+        fixed_cases, regression_cases = self._analyze_changes(
+            eval_results, previous_results
+        )
+
+        # Update previous change with current results
+        if self.history.changes:
+            self.history.update_last_change_results(eval_results["accuracy"], fixed_cases, regression_cases)
+
         # Format evaluation results
         results_str = "\n".join(
             f"Ticket: {result['ticket']}\n"
@@ -162,6 +226,8 @@ class ImprovementAgent(BaseAgent):
             """
         )
 
+        print(improvement_prompt)
+
         response = self.client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=2048,
@@ -169,7 +235,7 @@ class ImprovementAgent(BaseAgent):
         )
 
         response_text = response.content[0].text.strip()
-        
+
         # Parse motivation and new prompt
         motivation_line, new_prompt = response_text.split("\n", 1)
         motivation = motivation_line.replace("MOTIVATION: ", "").strip()
@@ -181,8 +247,8 @@ class ImprovementAgent(BaseAgent):
             old_prompt=current_prompt,
             new_prompt=new_prompt,
             motivation=motivation,
-            accuracy_before=eval_results["accuracy"]
+            accuracy_before=eval_results["accuracy"],
         )
         self.history.add_change(change)
 
-        return new_prompt 
+        return new_prompt
