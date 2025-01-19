@@ -1,9 +1,10 @@
-from typing import Dict, Any, List
+from typing import cast
 from agents import ClassificationAgent
+from agents.improvement_agent import EvaluationResults, TicketResult
 from config import EvalItem
 
-def evaluate_agent(agent: ClassificationAgent, eval_dataset: List[EvalItem]) -> Dict[str, Any]:
-    results = []
+def evaluate_agent(agent: ClassificationAgent, eval_dataset: list[EvalItem]) -> EvaluationResults:
+    results: list[TicketResult] = []
     correct = 0
     total = len(eval_dataset)
 
@@ -13,12 +14,13 @@ def evaluate_agent(agent: ClassificationAgent, eval_dataset: List[EvalItem]) -> 
         if is_correct:
             correct += 1
 
-        results.append({
+        # Cast prediction to Literal type since we know it's one of the valid values
+        results.append(cast(TicketResult, {
             "ticket": item["ticket"],
             "predicted": prediction,
             "actual": item["ground_truth"],
             "correct": is_correct
-        })
+        }))
 
     accuracy = correct / total
     return {

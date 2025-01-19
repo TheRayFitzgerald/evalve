@@ -1,5 +1,6 @@
 from config import ANTHROPIC_API_KEY, INITIAL_PROMPT, EVAL_DATASET
 from agents import ClassificationAgent, ImprovementAgent
+from agents.improvement_agent import EvaluationResults
 from evaluator import evaluate_agent
 
 MAX_ITERATIONS = 10
@@ -16,14 +17,14 @@ def main():
     best_accuracy = 0
     best_prompt = current_prompt
     consecutive_regressions = 0
-    previous_results = None
+    previous_results: EvaluationResults | None = None
 
     for iteration in range(MAX_ITERATIONS):
         print(f"\nIteration {iteration + 1}")
         print("-" * 50)
 
         # Evaluate current performance
-        eval_results = evaluate_agent(classification_agent, EVAL_DATASET)
+        eval_results: EvaluationResults = evaluate_agent(classification_agent, EVAL_DATASET)
         current_accuracy = eval_results["accuracy"]
         print(f"Current accuracy: {current_accuracy:.2%}")
 

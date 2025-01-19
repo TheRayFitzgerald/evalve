@@ -1,8 +1,28 @@
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Literal, TypedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from inspect import cleandoc
 from .base import BaseAgent
+
+# Shared type for urgency levels
+UrgencyLevel = Literal["low", "medium", "high", "critical"]
+
+class TicketResult(TypedDict):
+    ticket: str
+    predicted: UrgencyLevel
+    actual: UrgencyLevel
+    correct: bool
+
+class EvaluationResults(TypedDict):
+    accuracy: float
+    detailed_results: list[TicketResult]
+
+@dataclass
+class Case:
+    ticket: str
+    predicted: UrgencyLevel
+    actual: UrgencyLevel
+    description: str = ""
 
 @dataclass
 class PromptChange:
@@ -11,18 +31,18 @@ class PromptChange:
     new_prompt: str
     motivation: str
     accuracy_before: float
-    accuracy_after: Optional[float] = None
-    fixed_cases: List[str] = field(default_factory=list)
-    regression_cases: List[str] = field(default_factory=list)
+    accuracy_after: float | None = None
+    fixed_cases: list[Case] = field(default_factory=list)
+    regression_cases: list[Case] = field(default_factory=list)
 
 class PromptHistory:
     def __init__(self):
-        self.changes: List[PromptChange] = []
+        self.changes: list[PromptChange] = []
     
     def add_change(self, change: PromptChange):
         self.changes.append(change)
     
-    def update_last_change_results(self, accuracy: float, fixed_cases: List[str], regression_cases: List[str]):
+    def update_last_change_results(self, accuracy: float, fixed_cases: list[Case], regression_cases: list[Case]):
         if self.changes:
             self.changes[-1].accuracy_after = accuracy
             self.changes[-1].fixed_cases = fixed_cases
@@ -33,9 +53,9 @@ class ImprovementAgent(BaseAgent):
         super().__init__(api_key, system_prompt)
         self.history = PromptHistory()
 
-    def _analyze_changes(self, eval_results: Dict[str, Any], previous_results: Optional[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
-        fixed_cases = []
-        regression_cases = []
+    def _analyze_changes(self, eval_results: EvaluationResults, previous_results: EvaluationResults | None) -> tuple[list[Case], list[Case]]:
+        fixed_cases: list[Case] = []
+        regression_cases: list[Case] = []
         
         if previous_results:
             prev_results_map = {r["ticket"]: r for r in previous_results["detailed_results"]}
@@ -44,17 +64,26 @@ class ImprovementAgent(BaseAgent):
             # Find fixed and regression cases
             for ticket, curr_result in current_results_map.items():
                 if ticket in prev_results_map:
-                    prev_correct = prev_results_map[ticket]["correct"]
-                    curr_correct = curr_result["correct"]
+                    prev_result = prev_results_map[ticket]
                     
-                    if not prev_correct and curr_correct:
-                        fixed_cases.append(ticket)
-                    elif prev_correct and not curr_correct:
-                        regression_cases.append(ticket)
+                    if not prev_result["correct"] and curr_result["correct"]:
+                        fixed_cases.append(Case(
+                            ticket=ticket,
+                            predicted=curr_result["predicted"],
+                            actual=curr_result["actual"],
+                            description=f"Fixed: Was {prev_result['predicted']}, now correctly {curr_result['predicted']}"
+                        ))
+                    elif prev_result["correct"] and not curr_result["correct"]:
+                        regression_cases.append(Case(
+                            ticket=ticket,
+                            predicted=curr_result["predicted"],
+                            actual=curr_result["actual"],
+                            description=f"Regressed: Was correct {prev_result['predicted']}, now wrong {curr_result['predicted']}"
+                        ))
         
         return fixed_cases, regression_cases
 
-    def improve_prompt(self, eval_results: Dict[str, Any], current_prompt: str, previous_results: Optional[Dict[str, Any]] = None) -> str:
+    def improve_prompt(self, eval_results: EvaluationResults, current_prompt: str, previous_results: EvaluationResults | None = None) -> str:
         fixed_cases, regression_cases = self._analyze_changes(eval_results, previous_results)
         
         # Create history summary
@@ -62,13 +91,19 @@ class ImprovementAgent(BaseAgent):
         if self.history.changes:
             last_change = self.history.changes[-1]
             accuracy_str = f"{last_change.accuracy_after:.2%}" if last_change.accuracy_after is not None else "Not evaluated yet"
+            
+            fixed_cases_str = "\n".join(f"  - {case.description}" for case in last_change.fixed_cases) if last_change.fixed_cases else "  None"
+            regression_cases_str = "\n".join(f"  - {case.description}" for case in last_change.regression_cases) if last_change.regression_cases else "  None"
+            
             history_summary = cleandoc(f"""
                 Previous change summary:
                 - Motivation: {last_change.motivation}
                 - Previous accuracy: {last_change.accuracy_before:.2%}
                 - New accuracy: {accuracy_str}
-                - Fixed cases: {len(last_change.fixed_cases)}
-                - Regression cases: {len(last_change.regression_cases)}
+                - Fixed cases:
+                {fixed_cases_str}
+                - Regression cases:
+                {regression_cases_str}
             """)
 
         results_str = "\n".join(
@@ -80,6 +115,9 @@ class ImprovementAgent(BaseAgent):
                 for result in eval_results["detailed_results"]
             ]
         )
+
+        current_fixed_str = "\n".join(f"  - {case.description}" for case in fixed_cases) if fixed_cases else "  None"
+        current_regression_str = "\n".join(f"  - {case.description}" for case in regression_cases) if regression_cases else "  None"
 
         improvement_prompt = cleandoc(
             f"""<task>
@@ -95,8 +133,11 @@ class ImprovementAgent(BaseAgent):
             Evaluation results:
             {results_str}
 
-            Fixed cases from last change: {fixed_cases}
-            Regression cases from last change: {regression_cases}
+            Fixed cases from last change:
+            {current_fixed_str}
+            
+            Regression cases from last change:
+            {current_regression_str}
             </task>
 
             <guidelines>

@@ -1,0 +1,11 @@
+# Python Type Hints
+Use modern Python typing (3.9+):
+- Built-in generics: list[T], dict[K, V], set[T]  
+- Union types with |: str | None, int | float
+- Optional values: x | None (not Optional[x])
+- Type aliases: use = directly (TypeAlias not needed)
+- Match collection types to stdlib names: list not List
+- Avoid from typing import *
+- Only import specific types if no built-in equivalent
+Keep type hints clean, minimal and readable.
+Validate with mypy --strict.
