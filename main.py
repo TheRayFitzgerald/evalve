@@ -16,6 +16,7 @@ def main():
     best_accuracy = 0
     best_prompt = current_prompt
     consecutive_regressions = 0
+    previous_results = None
 
     for iteration in range(MAX_ITERATIONS):
         print(f"\nIteration {iteration + 1}")
@@ -40,8 +41,11 @@ def main():
                 best_prompt = current_prompt
 
         # Try to improve prompt
-        current_prompt = improvement_agent.improve_prompt(eval_results, current_prompt)
+        current_prompt = improvement_agent.improve_prompt(eval_results, current_prompt, previous_results)
         classification_agent = ClassificationAgent(ANTHROPIC_API_KEY, current_prompt)
+        
+        # Store current results for next iteration
+        previous_results = eval_results
 
         # Break if perfect accuracy is achieved
         if current_accuracy == 1.0:
